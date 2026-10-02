@@ -10,6 +10,7 @@ import org.rsmod.annotations.InternalApi
 import org.rsmod.api.net.rsprot.player.InterfaceEvents
 import org.rsmod.api.player.events.interact.HeldSubOpEvent
 import org.rsmod.api.player.output.UpdateInventory.resendSlot
+import org.rsmod.api.player.output.mes
 import org.rsmod.api.player.protect.ProtectedAccessLauncher
 import org.rsmod.api.player.ui.IfModalSubOpMenu
 import org.rsmod.api.player.ui.IfOverlaySubOpMenu
@@ -50,14 +51,23 @@ class IfSubOpHandler
         }
 
     override fun handle(player: Player, message: IfSubOp) {
+        val debugConstructionFurniture = message.interfaceId == 458
         val componentType = ServerCacheManager.fromComponent(message.asComponent.packed)
         val interfaceType = ServerCacheManager.fromInterface(message.asComponent.packed)
         val comsub = message.sub
         val buttonOp = message.buttonOp
         val subop = message.subop
+        if (debugConstructionFurniture) {
+            player.mes(
+                "IF458 subop: component=${message.componentId} sub=$comsub op=${message.op} subop=$subop obj=${message.obj}"
+            )
+        }
 
         val opEnabled = InterfaceEvents.isEnabled(player.ui, componentType, comsub, buttonOp.toIfEvent())
         if (!opEnabled) {
+            if (debugConstructionFurniture) {
+                player.mes("IF458 subop blocked: event mask is not enabled.")
+            }
             return
         }
 

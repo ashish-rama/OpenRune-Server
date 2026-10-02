@@ -4,6 +4,7 @@ plugins {
 
 dependencies {
     implementation(libs.fastutil)
+    implementation(libs.rsprot.api)
     implementation(libs.simmetrics.core)
     implementation(projects.api.areaChecker)
     implementation(projects.api.registry)
@@ -12,6 +13,7 @@ dependencies {
     implementation(projects.api.mechanics.toxins)
     implementation(projects.api.pluginCommons)
     implementation(projects.api.spellsAutocast)
+    implementation(projects.content.interfaces.bank)
 
     implementation(projects.api.utils.utilsSystem)
     implementation(projects.engine.utilsBits)

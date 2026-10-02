@@ -3,6 +3,7 @@ plugins {
 }
 
 dependencies {
+    implementation(projects.api.generated)
     implementation(projects.orCache)
     implementation(projects.engine.map)
     implementation(projects.api.dropTable)
@@ -48,4 +49,14 @@ tasks.register<JavaExec>("dumpShops") {
             "Example: ./gradlew :tools:wiki-dumping:dumpShops --args=\"--inv=axeshop --quiet\""
     classpath = sourceSets["main"].runtimeClasspath
     mainClass.set("org.rsmod.tools.wiki.dumping.ShopWikiDumperKt")
+}
+
+tasks.register<JavaExec>("cacheSearch") {
+    group = "application"
+    description =
+        "Searches decoded cache items, locs, and enums. " +
+            "Example: ./gradlew :tools:wiki-dumping:cacheSearch --args=\"poh_tree 500\""
+    classpath = sourceSets["main"].runtimeClasspath
+    mainClass.set("org.rsmod.tools.wiki.dumping.CacheSearchKt")
+    workingDir = rootProject.projectDir
 }

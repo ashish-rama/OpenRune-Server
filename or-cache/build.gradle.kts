@@ -32,6 +32,7 @@ tasks {
         classpath = sourceSets["main"].runtimeClasspath
         mainClass.set("dev.openrune.CacheToolsKt")
         args = listOf("BUILD")
+        jvmArgs("-XX:CompileCommand=exclude,dev/openrune/codegen/TableGeneraterKt.dominantDbRowTable")
     }
 
     register("freshCache",JavaExec::class) {
@@ -41,6 +42,7 @@ tasks {
         classpath = sourceSets["main"].runtimeClasspath
         mainClass.set("dev.openrune.CacheToolsKt")
         args = listOf("FRESH_INSTALL")
+        jvmArgs("-XX:CompileCommand=exclude,dev/openrune/codegen/TableGeneraterKt.dominantDbRowTable")
     }
 
     register<JavaExec>("mergePluginGamevals") {

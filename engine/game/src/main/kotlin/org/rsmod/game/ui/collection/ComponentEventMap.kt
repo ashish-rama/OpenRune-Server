@@ -6,6 +6,7 @@ import dev.openrune.rscm.RSCM.asRSCM
 import dev.openrune.rscm.RSCMType
 import it.unimi.dsi.fastutil.ints.Int2ObjectMap
 import it.unimi.dsi.fastutil.ints.Int2ObjectOpenHashMap
+import org.rsmod.game.ui.Component
 import org.rsmod.game.ui.UserInterface
 
 public class ComponentEventMap(
@@ -35,6 +36,12 @@ public class ComponentEventMap(
         eventList.add(event)
     }
 
+    public fun add(component: Component, range: IntRange, events: Long) {
+        val eventList = interfaces.computeIfAbsent(component.parent) { mutableListOf() }
+        val event = Event.from(component.child, range.first, range.last, events)
+        eventList.add(event)
+    }
+
     public fun clear(interf: UserInterface) {
         interfaces.remove(interf.id)
     }
@@ -42,7 +49,7 @@ public class ComponentEventMap(
     public data class Event(val component: Int, val start: Int, val end: Int, val events: Long) {
         public companion object {
             public fun from(component: Int, start: Int, end: Int, events: Long): Event {
-                val clampedStart = if (start == -1) 0 else start
+                val clampedStart = start
                 val clampedEnd = if (end == -1) Int.MAX_VALUE else end
                 return Event(component, clampedStart, clampedEnd, events)
             }

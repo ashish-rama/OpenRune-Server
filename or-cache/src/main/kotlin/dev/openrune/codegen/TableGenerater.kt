@@ -149,6 +149,7 @@ private fun sampleRowsForTable(tableId: Int, rows: Map<Int, DBRowType>): List<Db
 private fun mergeColumnMetadata(
     table: Table,
     samples: List<DbHelper>,
+    dbtable: DBTableType?,
 ): Map<String, ColumnMetadata> {
     val byName = table.columns.associate { it.name to ColumnMetadata() }.toMutableMap()
     for (row in samples) {
@@ -160,6 +161,13 @@ private fun mergeColumnMetadata(
                 meta.optional = true
             }
         }
+    }
+    for (col in table.columns) {
+        val meta = byName.getValue(col.name)
+        if (meta.slotTypes.isNotEmpty()) {
+            continue
+        }
+        dbtable?.columns?.get(col.id)?.types?.forEachIndexed { i, t -> meta.slotTypes[i] = t }
     }
     return byName
 }
@@ -263,7 +271,7 @@ fun startGeneration(
     for (el in elements) {
         val table = el.elementAs<Table>() ?: continue
         val samples = sampleRowsForTable(table.id, rows)
-        val meta = mergeColumnMetadata(table, samples)
+        val meta = mergeColumnMetadata(table, samples, dbtables[table.id])
         val maxLen =
             table.columns.associate { c ->
                 c.name to (samples.maxOfOrNull { it.valuesAt(c.id)?.size ?: 0 } ?: 0)

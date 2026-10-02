@@ -9,6 +9,7 @@ import jakarta.inject.Inject
 import net.rsprot.protocol.game.incoming.buttons.IfButtonT
 import org.rsmod.annotations.InternalApi
 import org.rsmod.api.net.rsprot.player.InterfaceEvents
+import org.rsmod.api.player.output.mes
 import org.rsmod.api.player.protect.ProtectedAccessLauncher
 import org.rsmod.api.player.ui.IfModalButtonT
 import org.rsmod.api.player.ui.IfOverlayButtonT
@@ -26,6 +27,13 @@ constructor(private val eventBus: EventBus, private val protectedAccess: Protect
 
     @OptIn(InternalApi::class)
     override fun handle(player: Player, message: IfButtonT) {
+        val debugConstructionFurniture =
+            message.selectedInterfaceId == 458 || message.targetInterfaceId == 458
+        if (debugConstructionFurniture) {
+            player.mes(
+                "IF458 buttonT: selected=${message.selectedInterfaceId}:${message.selectedComponentId}/${message.selectedSub} target=${message.targetInterfaceId}:${message.targetComponentId}/${message.targetSub}"
+            )
+        }
         val selectedComponent = Component(message.selectedInterfaceId, message.selectedComponentId)
         val selectedComponentType = ServerCacheManager.fromComponent(selectedComponent.packed)
         val selectedInterface = ServerCacheManager.fromInterface(selectedComponent.packed)
@@ -37,6 +45,9 @@ constructor(private val eventBus: EventBus, private val protectedAccess: Protect
         val isSelectedOpenedModal = ui.containsModal(selectedInterface)
         val isSelectedOpened = isSelectedOpenedModal || ui.containsOverlay(selectedInterface)
         if (!isSelectedOpened) {
+            if (debugConstructionFurniture) {
+                player.mes("IF458 buttonT blocked: selected interface is not open.")
+            }
             logger.debug { "Selected interface is not open: message=$message, player=$player" }
             return
         }
@@ -47,6 +58,9 @@ constructor(private val eventBus: EventBus, private val protectedAccess: Protect
             val isTargetOpenedModal = ui.containsModal(targetInterface)
             val targetOpened = isTargetOpenedModal || ui.containsOverlay(targetInterface)
             if (!targetOpened) {
+                if (debugConstructionFurniture) {
+                    player.mes("IF458 buttonT blocked: target interface is not open.")
+                }
                 logger.debug { "Target interface is not open: message=$message, player=$player" }
                 return
             }
@@ -58,6 +72,9 @@ constructor(private val eventBus: EventBus, private val protectedAccess: Protect
         val targetEnabled =
             isTargetEnabled(ui, selectedComponentType, selectedSub, targetComponentType, targetSub)
         if (!targetEnabled) {
+            if (debugConstructionFurniture) {
+                player.mes("IF458 buttonT blocked: target event mask is not enabled.")
+            }
             return
         }
 
@@ -92,6 +109,9 @@ constructor(private val eventBus: EventBus, private val protectedAccess: Protect
             )
         player.ifCloseInputDialog()
         if (player.isModalButtonProtected) {
+            if (debugConstructionFurniture) {
+                player.mes("IF458 buttonT blocked: modal buttons are protected.")
+            }
             logger.debug { "[Modal][BLOCKED] IfButtonT: $message (modalButton=$modalButton)" }
             return
         }

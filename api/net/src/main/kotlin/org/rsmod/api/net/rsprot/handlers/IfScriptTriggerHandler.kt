@@ -5,6 +5,7 @@ import dev.openrune.ServerCacheManager
 import jakarta.inject.Inject
 import net.rsprot.protocol.game.incoming.buttons.IfScriptTrigger
 import org.rsmod.annotations.InternalApi
+import org.rsmod.api.player.output.mes
 import org.rsmod.api.player.protect.ProtectedAccessLauncher
 import org.rsmod.api.player.ui.IfOverlayScriptTrigger
 import org.rsmod.api.player.ui.IfScriptParameterRegistry
@@ -25,6 +26,11 @@ constructor(
 
     @OptIn(InternalApi::class)
     override fun handle(player: Player, message: IfScriptTrigger) {
+        if (message.interfaceId == 458) {
+            player.mes(
+                "IF458 script trigger: component=${message.componentId} sub=${message.sub} obj=${message.obj} crc=${message.crc}"
+            )
+        }
         val componentType = ServerCacheManager.fromComponent(message.asComponent.packed)
 
         val parameterTypes = IfScriptParameterRegistry[componentType.packed]

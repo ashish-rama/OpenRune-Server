@@ -13,6 +13,7 @@ internal fun Player.protectedTelejump(collision: CollisionFlagMap, dest: CoordGr
     if (isAccessProtected) {
         return false
     }
+    collision.allocateIfAbsent(dest.x, dest.z, dest.level)
     launch {
         val context = ProtectedAccessContextFactory.empty()
         val access = ProtectedAccess(this@protectedTelejump, this, context)

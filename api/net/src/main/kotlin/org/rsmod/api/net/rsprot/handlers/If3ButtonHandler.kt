@@ -8,6 +8,7 @@ import jakarta.inject.Inject
 import net.rsprot.protocol.game.incoming.buttons.If3Button
 import org.rsmod.annotations.InternalApi
 import org.rsmod.api.net.rsprot.player.InterfaceEvents
+import org.rsmod.api.player.output.mes
 import org.rsmod.api.player.protect.ProtectedAccessLauncher
 import org.rsmod.api.player.ui.IfModalButton
 import org.rsmod.api.player.ui.IfOverlayButton
@@ -43,14 +44,23 @@ constructor(private val eventBus: EventBus, private val protectedAccess: Protect
 
     @OptIn(InternalApi::class)
     override fun handle(player: Player, message: If3Button) {
+        val debugConstructionFurniture = message.interfaceId == 458
         val componentType = ServerCacheManager.fromComponent(message.asComponent.packed)
         val interfaceType = ServerCacheManager.fromInterface(message.asComponent.packed)
         val comsub = message.sub
         val buttonOp = message.buttonOp
+        if (debugConstructionFurniture) {
+            player.mes(
+                "IF458 click: component=${message.componentId} sub=$comsub op=${message.op} obj=${message.obj}"
+            )
+        }
 
         val opEnabled =
             InterfaceEvents.isEnabled(player.ui, componentType, comsub, buttonOp.toIfEvent())
         if (!opEnabled) {
+            if (debugConstructionFurniture) {
+                player.mes("IF458 click blocked: event mask is not enabled.")
+            }
             return
         }
 
@@ -77,11 +87,19 @@ constructor(private val eventBus: EventBus, private val protectedAccess: Protect
                 )
             player.ifCloseInputDialog()
             if (player.isModalButtonProtected) {
+                if (debugConstructionFurniture) {
+                    player.mes("IF458 click blocked: modal buttons are protected.")
+                }
                 logger.debug { "[Modal][BLOCKED] If3Button: $message (event=$event)" }
                 return
             }
             logger.debug { "[Modal] If3Button: $message (event=$event)" }
             protectedAccess.launchLenient(player) { eventBus.publish(this, event) }
+            return
+        }
+
+        if (debugConstructionFurniture) {
+            player.mes("IF458 click blocked: interface is not open as modal/overlay/top-level.")
         }
     }
 

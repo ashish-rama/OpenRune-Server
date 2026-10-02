@@ -2,13 +2,19 @@ package org.rsmod.content.other.commands
 
 import com.github.michaelbull.logging.InlineLogger
 import dev.openrune.ServerCacheManager
+import dev.openrune.definition.util.CacheVarLiteral
+import dev.openrune.literal.CacheVarTypeMap
 import dev.openrune.rscm.RSCM
 import dev.openrune.rscm.RSCM.asRSCM
 import dev.openrune.rscm.RSCMType
+import dev.openrune.types.ItemServerType
 import dev.openrune.types.NpcMode
+import dev.openrune.types.NpcServerType
+import dev.openrune.types.ObjectServerType
 import jakarta.inject.Inject
 import kotlin.math.max
 import kotlin.math.min
+import net.rsprot.protocol.game.outgoing.interfaces.IfOpenSub as IfOpenSubProt
 import org.rsmod.annotations.InternalApi
 import org.rsmod.api.area.checker.AreaChecker
 import org.rsmod.api.death.prepareAdminDieTest
@@ -20,8 +26,10 @@ import org.rsmod.api.mechanics.toxins.impl.PlayerVenom
 import org.rsmod.api.invtx.invClear
 import org.rsmod.api.player.ironman.PlayerGamemode
 import org.rsmod.api.player.ironman.setGamemode
+import org.rsmod.api.player.hook.TeleportType
 import org.rsmod.api.player.output.MiscOutput
 import org.rsmod.api.player.output.mes
+import org.rsmod.api.player.output.soundSynth
 import org.rsmod.api.player.cheat.adminGodMode
 import org.rsmod.api.player.cheat.adminMaxHit
 import org.rsmod.api.player.protect.ProtectedAccessLauncher
@@ -31,6 +39,8 @@ import org.rsmod.api.player.stat.stat
 import org.rsmod.api.player.stat.statAdvance
 import org.rsmod.api.player.stat.statSub
 import org.rsmod.api.player.ui.PlayerInterfaceUpdates
+import org.rsmod.api.player.ui.IfOpenSub as IfOpenSubEvent
+import org.rsmod.api.player.ui.ifClose
 import org.rsmod.api.player.vars.VarPlayerIntMapSetter
 import org.rsmod.api.player.vars.boolVarBit
 import org.rsmod.api.player.vars.resyncVar
@@ -39,15 +49,20 @@ import org.rsmod.api.repo.loc.LocRepository
 import org.rsmod.api.repo.npc.NpcRepository
 import org.rsmod.api.utils.format.formatAmount
 import org.rsmod.api.utils.system.SafeServiceExit
+import org.rsmod.content.interfaces.bank.openBank
+import org.rsmod.events.EventBus
 import org.rsmod.game.GameUpdate
 import org.rsmod.game.cheat.Cheat
 import org.rsmod.game.entity.Npc
 import org.rsmod.game.entity.Player
 import org.rsmod.game.entity.PlayerList
+import org.rsmod.game.entity.util.PathingEntityCommon
 import org.rsmod.game.loc.LocAngle
 import org.rsmod.game.loc.LocEntity
 import org.rsmod.game.loc.LocInfo
 import org.rsmod.game.loc.LocShape
+import org.rsmod.game.ui.Component
+import org.rsmod.game.ui.UserInterface
 import org.rsmod.game.stat.PlayerSkillXPTable
 import org.rsmod.map.CoordGrid
 import org.rsmod.map.square.MapSquareGrid
@@ -57,7 +72,9 @@ import org.rsmod.map.zone.ZoneKey
 import org.rsmod.objtx.TransactionResult
 import org.rsmod.plugin.scripts.PluginScript
 import org.rsmod.plugin.scripts.ScriptContext
+import org.rsmod.routefinder.collision.CollisionFlagMap
 import org.rsmod.routefinder.loc.LocLayerConstants
+import dev.openrune.types.aconverted.interf.IfSubType
 import org.simmetrics.metrics.StringMetrics
 
 class AdminCommands
@@ -68,6 +85,8 @@ constructor(
     private val locRepo: LocRepository,
     private val npcRepo: NpcRepository,
     private val update: GameUpdate,
+    private val eventBus: EventBus,
+    private val collision: CollisionFlagMap,
     private val areaChecker: AreaChecker,
     private val regions: RegionRegistry,
 ) : PluginScript() {
@@ -84,6 +103,9 @@ constructor(
         onCommand("tele", "Teleport to coordgrid", ::tele) {
             invalidArgs = "Usage: ::tele mx mz [level](e.g. ::tele 3200 3200 0)"
         }
+        onCommand("teleforce", "Teleport to coordgrid and allocate missing collision zone", ::teleForce) {
+            invalidArgs = "Usage: ::teleforce mx mz [level](e.g. ::teleforce 3200 3200 0)"
+        }
         onCommand("telezone", "Teleport to zone key", ::teleZone) {
             invalidArgs = "Use as ::telezone zoneX zoneY level (ex: 400 400 0)"
         }
@@ -96,6 +118,12 @@ constructor(
         onCommand("anim", "Play animation", ::anim)
         onCommand("spot", "Play spotanim", ::spotanim) {
             invalidArgs = "Use as ::spot spotanimDebugNameOrId (ex: fx_emote_party01_active)"
+        }
+        onCommand("sound", "Play synth sound", ::sound) {
+            invalidArgs = "Use as ::sound synthDebugNameOrId [delay] [loops] (ex: ::sound teleport_all)"
+        }
+        onCommand("synth", "Play synth sound", ::sound) {
+            invalidArgs = "Use as ::synth synthDebugNameOrId [delay] [loops] (ex: ::synth 200)"
         }
         onCommand("object", "Spawn loc", ::locAdd) {
             invalidArgs = "Use as ::object duration locDebugNameOrId (ex: 100 bookcase)"
@@ -117,8 +145,29 @@ constructor(
 
         onCommand("invadd", "Spawn obj into inv", ::invAdd)
         onCommand("item", "Spawn obj into inv", ::invAdd)
+        onCommand("itemfind", "Search item cache defs", ::itemFind) {
+            invalidArgs = "Use as ::itemfind itemNameOrId (ex: ::itemfind poh_tree)"
+        }
+        onCommand("locfind", "Search loc cache defs", ::locFind) {
+            invalidArgs = "Use as ::locfind locNameOrId (ex: ::locfind portal)"
+        }
 
         onCommand("invclear", "Remove all objs from inv", ::invClear)
+        onCommand("bank", "Open your bank", ::bank)
+        onCommand("ifopen", "Open interface by id or debug name", ::ifOpen) {
+            invalidArgs = "Use as ::ifopen interfaceId|debugName (ex: ::ifopen 71 or ::ifopen poh_options)"
+        }
+        onCommand("ifdump", "Dump decoded interface components", ::ifDump) {
+            invalidArgs = "Use as ::ifdump interfaceId|debugName [query] (ex: ::ifdump 458 build)"
+        }
+        onCommand("enumdump", "Dump cache enum entries", ::enumDump) {
+            invalidArgs = "Use as ::enumdump enumId|debugName [query] (ex: ::enumdump 2157 poh)"
+        }
+        onCommand("enumfind", "Search all decoded cache enum entries", ::enumFind) {
+            invalidArgs = "Use as ::enumfind query [maxRows] (ex: ::enumfind poh_tree 200)"
+        }
+        onCommand("ifclose", "Close open modal interfaces", ::ifClose)
+//        onCommand("openbank", "Open your bank", ::bank)
         onCommand("varp", "Set varp value", ::setVarp) {
             invalidArgs = "Use as ::varp debugNameOrId value (ex: option_run 1)"
         }
@@ -148,7 +197,290 @@ constructor(
         onCommand("gamemode", "Set account gamemode (normal|ironman|uim|hcim)", ::gamemode) {
             invalidArgs = "Use as ::gamemode normal|ironman|uim|hcim"
         }
+        onCommand("home", "tele to lumbridge", ::home) {
+            invalidArgs = "Use as ::home"
+        }
     }
+
+    private fun ifOpen(cheat: Cheat) =
+        with(cheat) {
+            val raw = args.getOrNull(0)
+            if (raw == null) {
+                player.mes("Use as ::ifopen interfaceId|debugName (ex: ::ifopen 71 or ::ifopen poh_options)")
+                return
+            }
+            val interfaceId = raw.toIntOrNull() ?: resolveInterfaceId(raw)
+            if (interfaceId == null || ServerCacheManager.getInterface(interfaceId) == null) {
+                player.mes("Could not find interface: $raw")
+                return
+            }
+            player.openMainModalInterface(interfaceId)
+            player.mes("Opened interface $interfaceId.")
+        }
+
+    private fun ifClose(cheat: Cheat) =
+        with(cheat) {
+            player.ifClose(eventBus)
+            player.mes("Closed modal interfaces.")
+        }
+
+    private fun ifDump(cheat: Cheat) =
+        with(cheat) {
+            val raw = args.getOrNull(0)
+            if (raw == null) {
+                player.mes("Use as ::ifdump interfaceId|debugName [query] (ex: ::ifdump 458 build)")
+                return
+            }
+            val query = args.drop(1).joinToString(" ").lowercase()
+            val interfaceId = raw.toIntOrNull() ?: resolveInterfaceId(raw)
+            val interf = interfaceId?.let(ServerCacheManager::getInterface)
+            if (interfaceId == null || interf == null) {
+                player.mes("Could not find interface: $raw")
+                return
+            }
+            val matches =
+                interf.components.entries
+                    .asSequence()
+                    .sortedBy { it.key }
+                    .filter { (_, component) ->
+                        if (query.isBlank()) {
+                            true
+                        } else {
+                            listOf(
+                                    component.internalName,
+                                    component.text,
+                                    component.buttonText,
+                                    component.opBase,
+                                    component.op.joinToString(" "),
+                                )
+                                .joinToString(" ")
+                                .lowercase()
+                                .contains(query)
+                        }
+                    }
+                    .toList()
+            val header =
+                "Interface $interfaceId has ${interf.components.size} components" +
+                    if (query.isBlank()) "." else "; ${matches.size} match '$query'."
+            player.mes(header)
+            logger.info { "[ifdump] ${player.username}: $header" }
+            if (matches.isEmpty()) {
+                player.mes("No components match '$query'.")
+                logger.info { "[ifdump] ${player.username}: No components match '$query'." }
+                return@with
+            }
+            player.mes("Dumped ${matches.size} component rows to the server log.")
+            for ((id, component) in matches) {
+                val ops = component.op.filterNotNull().filter { it.isNotBlank() }.joinToString("/")
+                val scripts =
+                    listOfNotNull(
+                            "op".takeIf { !component.onOp.isNullOrEmpty() },
+                            "click".takeIf { !component.onClick.isNullOrEmpty() },
+                            "release".takeIf { !component.onRelease.isNullOrEmpty() },
+                            "hold".takeIf { !component.onHold.isNullOrEmpty() },
+                            "load".takeIf { !component.onLoad.isNullOrEmpty() },
+                        )
+                        .joinToString("/")
+                val line =
+                    "if:$interfaceId comp:$id type=${component.type} button=${component.buttonType} " +
+                        "size=${component.width}x${component.height} events=${component.events} " +
+                        "text='${component.text}' btn='${component.buttonText}' opbase='${component.opBase}' " +
+                        "ops='$ops' scripts='$scripts'"
+                logger.info { "[ifdump] $line" }
+            }
+        }
+
+    private fun enumDump(cheat: Cheat) =
+        with(cheat) {
+            val raw = args.getOrNull(0)
+            if (raw == null) {
+                player.mes("Use as ::enumdump enumId|debugName [query] (ex: ::enumdump 2157 poh)")
+                return
+            }
+            val query = args.drop(1).joinToString(" ").lowercase()
+            val enumId = raw.toIntOrNull() ?: "enum.$raw".asRSCM(RSCMType.ENUM)
+            val enum = ServerCacheManager.getEnum(enumId)
+            if (enum == null) {
+                player.mes("Could not find enum: $raw")
+                return
+            }
+            val matches =
+                enum.values.entries
+                    .asSequence()
+                    .sortedBy { it.key }
+                    .filter { (key, value) ->
+                        val decodedKey = decodeEnumSlot(enum.keyType, key)
+                        val decodedValue = decodeEnumSlot(enum.valueType, value)
+                        if (query.isBlank()) {
+                            true
+                        } else {
+                            listOf(
+                                    key.toString(),
+                                    value.toString(),
+                                    describeEnumSlot(decodedKey),
+                                    describeEnumSlot(decodedValue),
+                                )
+                                .joinToString(" ")
+                                .lowercase()
+                                .contains(query)
+                        }
+                    }
+                    .toList()
+            val header =
+                "Enum $enumId size=${enum.values.size} key=${enum.keyType.name} value=${enum.valueType.name} " +
+                    "defaultInt=${enum.defaultInt} defaultString='${enum.defaultString}'" +
+                    if (query.isBlank()) "" else "; ${matches.size} match '$query'"
+            player.mes(header)
+            logger.info { "[enumdump] ${player.username}: $header" }
+            if (matches.isEmpty()) {
+                player.mes("No enum entries match '$query'.")
+                logger.info { "[enumdump] ${player.username}: No enum entries match '$query'." }
+                return@with
+            }
+            player.mes("Dumped ${matches.size} enum rows to the server log.")
+            for ((key, value) in matches) {
+                val decodedKey = decodeEnumSlot(enum.keyType, key)
+                val decodedValue = decodeEnumSlot(enum.valueType, value)
+                logger.info {
+                    "enum:$enumId key=${describeEnumSlot(decodedKey)} rawKey=$key " +
+                        "value=${describeEnumSlot(decodedValue)} rawValue=$value"
+                }
+            }
+        }
+
+    private fun enumFind(cheat: Cheat) =
+        with(cheat) {
+            val query = args.getOrNull(0)?.lowercase()
+            if (query.isNullOrBlank()) {
+                player.mes("Use as ::enumfind query [maxRows] (ex: ::enumfind poh_tree 200)")
+                return
+            }
+            val maxRows = args.getOrNull(1)?.toIntOrNull()?.coerceIn(1, 1000) ?: 200
+            var logged = 0
+            var matchingEnums = 0
+            logger.info {
+                "[enumfind] ${player.username}: searching ${ServerCacheManager.enumSize()} enums " +
+                    "for '$query' maxRows=$maxRows"
+            }
+            for ((enumId, enum) in ServerCacheManager.getEnums().entries.sortedBy { it.key }) {
+                var enumMatched = false
+                for ((key, value) in enum.values.entries.sortedBy { it.key }) {
+                    val decodedKey = decodeEnumSlot(enum.keyType, key)
+                    val decodedValue = decodeEnumSlot(enum.valueType, value)
+                    val haystack =
+                        listOf(
+                                enumId.toString(),
+                                key.toString(),
+                                value.toString(),
+                                describeEnumSlot(decodedKey),
+                                describeEnumSlot(decodedValue),
+                            )
+                            .joinToString(" ")
+                            .lowercase()
+                    if (query !in haystack) {
+                        continue
+                    }
+                    if (!enumMatched) {
+                        matchingEnums++
+                        enumMatched = true
+                        logger.info {
+                            "[enumfind] enum:$enumId size=${enum.values.size} " +
+                                "key=${enum.keyType.name} value=${enum.valueType.name} " +
+                                "defaultInt=${enum.defaultInt} defaultString='${enum.defaultString}'"
+                        }
+                    }
+                    logger.info {
+                        "[enumfind] enum:$enumId key=${describeEnumSlot(decodedKey)} rawKey=$key " +
+                            "value=${describeEnumSlot(decodedValue)} rawValue=$value"
+                    }
+                    logged++
+                    if (logged >= maxRows) {
+                        player.mes(
+                            "Enum search hit maxRows=$maxRows across $matchingEnums enums; see server log."
+                        )
+                        logger.info {
+                            "[enumfind] ${player.username}: stopped at maxRows=$maxRows " +
+                                "matchingEnums=$matchingEnums"
+                        }
+                        return@with
+                    }
+                }
+            }
+            player.mes("Enum search logged $logged rows across $matchingEnums enums.")
+            logger.info {
+                "[enumfind] ${player.username}: complete loggedRows=$logged matchingEnums=$matchingEnums"
+            }
+        }
+
+    @Suppress("UNCHECKED_CAST")
+    private fun decodeEnumSlot(type: CacheVarLiteral, raw: Any?): Any? =
+        when (raw) {
+            null -> null
+            is Int ->
+                runCatching { CacheVarTypeMap.findCodec<Int, Any>(type).decode(raw) }.getOrNull()
+                    ?: raw
+            is String ->
+                runCatching { CacheVarTypeMap.findCodec<String, Any>(type).decode(raw) }.getOrNull()
+                    ?: raw
+            else -> raw
+        }
+
+    private fun describeEnumSlot(value: Any?): String =
+        when (value) {
+            null -> "null"
+            is ItemServerType -> "obj:${value.id}:${value.internalName}:'${value.name}'"
+            is ObjectServerType -> "loc:${value.id}:${value.internalName}:'${value.name}'"
+            is NpcServerType -> "npc:${value.id}:${value.internalName}:'${value.name}'"
+            else -> value.toString()
+        }
+
+    private fun resolveInterfaceId(raw: String): Int? {
+        val internal = if (raw.startsWith("interface.")) raw else "interface.$raw"
+        val id = internal.asRSCM(RSCMType.INTERFACE)
+        return id.takeIf { it != -1 }
+    }
+
+    private fun Player.openMainModalInterface(interfaceId: Int) {
+        val target = ServerCacheManager.fromComponent("component.toplevel_osrs_stretch:mainmodal")
+        val targetComponent = Component(target.packed)
+        val translated = ui.gameframe.getOrNull(targetComponent) ?: targetComponent
+        val userInterface =
+            ServerCacheManager.getInterface(interfaceId)?.let(::UserInterface)
+                ?: error("Could not find interface id $interfaceId")
+        ui.modals[targetComponent] = userInterface
+        client.write(
+            IfOpenSubProt(
+                translated.parent,
+                translated.child,
+                interfaceId,
+                IfSubType.Modal.id,
+            )
+        )
+        eventBus.publish(IfOpenSubEvent(this, userInterface, targetComponent, IfSubType.Modal))
+    }
+
+    private fun home(cheat: Cheat) =
+        with(cheat) {
+            val coords = CoordGrid(3222, 3222, 0)
+            protectedAccess.launch(player) {
+                PathingEntityCommon.anim(
+                    player,
+                    RSCM.getReverseMapping(RSCMType.SEQ, 714),
+                    delay = 0,
+                    priority = 0,
+                )
+                player.spotanim(RSCM.getReverseMapping(RSCMType.SPOTANIM, 111), height = 92)
+                delay(3)
+                telejump(coords, TeleportType.Exempt)
+                PathingEntityCommon.anim(
+                    player,
+                    RSCM.getReverseMapping(RSCMType.SEQ, 715),
+                    delay = 0,
+                    priority = 0,
+                )
+                player.mes("Teleported to $coords.")
+            }
+        }
 
     private fun gamemode(cheat: Cheat) =
         with(cheat) {
@@ -253,7 +585,21 @@ constructor(
             val coords = CoordGrid(x,y,level)
             protectedAccess.launch(player) {
                 player.mes("Teleported to $coords.")
-                telejump(coords)
+                telejump(coords, TeleportType.Exempt)
+            }
+        }
+
+    private fun teleForce(cheat: Cheat) =
+        with(cheat) {
+            val args = if (args.size == 1) args[0].split(",") else args
+            val x = args[0].toInt()
+            val y = args[1].toInt()
+            val level = args.getOrNull(2)?.toInt() ?: 0
+            val coords = CoordGrid(x, y, level)
+            collision.allocateIfAbsent(coords.x, coords.z, coords.level)
+            protectedAccess.launch(player) {
+                player.mes("Force teleported to $coords.")
+                telejump(coords, collision, TeleportType.Exempt)
             }
         }
 
@@ -266,7 +612,7 @@ constructor(
             val coords = ZoneKey(zoneX, zoneZ, level).toCoords()
             protectedAccess.launch(player) {
                 player.mes("Teleported to $coords.")
-                telejump(coords)
+                telejump(coords, TeleportType.Exempt)
             }
         }
 
@@ -307,7 +653,7 @@ constructor(
             val dest = current.copy(level = destLevel)
             protectedAccess.launch(player) {
                 player.mes("Teleported to $dest.")
-                telejump(dest)
+                telejump(dest, TeleportType.Exempt)
             }
         }
     }
@@ -332,16 +678,37 @@ constructor(
     private fun spotanim(cheat: Cheat) =
         with(cheat) {
             val (typeName, heightArg) = args.asTypeNameAndNumber(defaultNumber = 0)
-            val typeId = "spotanim.${typeName}".asRSCM()
+            val typeId = typeName.toIntOrNull() ?: "spotanim.$typeName".asRSCM(RSCMType.SPOTANIM)
             if (typeId == -1) {
                 player.mes("There is no spotanim mapped to: '${typeName}'")
                 return
             }
 
             val height = min(heightArg.toInt(), Short.MAX_VALUE.toInt())
-            player.spotanim("spotanim.${typeName}", delay = 0, height = height, slot = 0)
+            val spotanim = RSCM.getReverseMapping(RSCMType.SPOTANIM, typeId)
+            player.spotanim(spotanim, delay = 0, height = height, slot = 0)
             player.mes("Spotanim: '${typeName}' (height=$height)")
             logger.debug { "Spotanim: $typeName" }
+        }
+
+    private fun sound(cheat: Cheat) =
+        with(cheat) {
+            val typeName = args.getOrNull(0)
+            if (typeName == null) {
+                player.mes("Use as ::sound synthDebugNameOrId [delay] [loops] (ex: ::sound teleport_all)")
+                return
+            }
+            val typeId = typeName.toIntOrNull() ?: RSCM.getRSCM("synth.$typeName")
+            if (typeId == -1) {
+                player.mes("There is no synth mapped to: '$typeName'")
+                return
+            }
+
+            val delay = args.getOrNull(1)?.toIntOrNull() ?: 0
+            val loops = args.getOrNull(2)?.toIntOrNull() ?: 1
+            player.soundSynth(typeId, loops = loops, delay = delay)
+            player.mes("Sound: '$typeName' (id=$typeId, delay=$delay, loops=$loops)")
+            logger.debug { "Sound: $typeName (id=$typeId, delay=$delay, loops=$loops)" }
         }
 
     private fun locAdd(cheat: Cheat) =
@@ -386,11 +753,12 @@ constructor(
 
     private fun npcAdd(cheat: Cheat) =
         with(cheat) {
-            val typeId = "npc.${args[1]}".asRSCM()
+            val typeName = args[1]
+            val typeId = typeName.toIntOrNull() ?: "npc.$typeName".asRSCM(RSCMType.NPC)
 
             val type = ServerCacheManager.getNpc(typeId)
             if (type == null) {
-                player.mes("That npc does not exist: $typeId")
+                player.mes("That npc does not exist: $typeName")
                 return
             }
             val duration = args[0].toInt()
@@ -404,12 +772,17 @@ constructor(
         with(cheat) {
             val (typeName, countArg) = args.asTypeNameAndNumber(defaultNumber = 1)
             val normalizedName = "obj.$typeName"
-            val type = ServerCacheManager.getItem(normalizedName.asRSCM(RSCMType.OBJ))?: return@with
+            val typeId = typeName.toIntOrNull() ?: normalizedName.asRSCM(RSCMType.OBJ)
+            val type = ServerCacheManager.getItem(typeId)
+            if (type == null) {
+                player.mes("That item does not exist: $typeName")
+                return@with
+            }
 
             val count = countArg.toLong().coerceAtMost(Int.MAX_VALUE.toLong()).toInt()
             val objName = type.name.ifEmpty { normalizedName }
 
-            val spawned = player.invAdd(player.inv, normalizedName, count, strict = false)
+            val spawned = player.invAdd(player.inv, typeId, count, strict = false)
             if (spawned.err is TransactionResult.RestrictedDummyitem) {
                 player.mes("You can't spawn this item!")
                 return
@@ -417,7 +790,79 @@ constructor(
             player.mes("Spawned inv obj `$objName` x ${spawned.completed().formatAmount}")
         }
 
+    private fun itemFind(cheat: Cheat) =
+        with(cheat) {
+            val query = args.joinToString("_")
+            val id = query.toIntOrNull()
+            if (id != null) {
+                val item = ServerCacheManager.getItem(id)
+                if (item == null) {
+                    player.mes("No item found for id=$id")
+                } else {
+                    player.mes("Item $id: ${item.internalName} '${item.name}'")
+                }
+                return@with
+            }
+
+            val normalized = query.lowercase()
+            val matches =
+                ServerCacheManager.getItems().entries
+                    .asSequence()
+                    .filter { (_, item) ->
+                        item.name.lowercase().contains(normalized) ||
+                            item.internalName.lowercase().contains(normalized)
+                    }
+                    .take(12)
+                    .toList()
+            if (matches.isEmpty()) {
+                player.mes("No item matches for '$query'")
+                return@with
+            }
+            player.mes(
+                matches.joinToString(prefix = "Items: ") { (id, item) ->
+                    "$id=${item.internalName} '${item.name}'"
+                }
+            )
+        }
+
+    private fun locFind(cheat: Cheat) =
+        with(cheat) {
+            val query = args.joinToString("_")
+            val id = query.toIntOrNull()
+            if (id != null) {
+                val loc = ServerCacheManager.getObject(id)
+                if (loc == null) {
+                    player.mes("No loc found for id=$id")
+                } else {
+                    player.mes("Loc $id: ${loc.internalName} '${loc.name}'")
+                }
+                return@with
+            }
+
+            val normalized = query.lowercase()
+            val matches =
+                ServerCacheManager.getObjects().entries
+                    .asSequence()
+                    .filter { (_, loc) ->
+                        loc.name.lowercase().contains(normalized) ||
+                            loc.internalName.lowercase().contains(normalized)
+                    }
+                    .take(12)
+                    .toList()
+            if (matches.isEmpty()) {
+                player.mes("No loc matches for '$query'")
+                return@with
+            }
+            player.mes(
+                matches.joinToString(prefix = "Locs: ") { (id, loc) ->
+                    "$id=${loc.internalName} '${loc.name}'"
+                }
+            )
+        }
+
     private fun invClear(cheat: Cheat) = with(cheat) { player.invClear(player.inv) }
+
+    private fun bank(cheat: Cheat) = cheat.player.openBank(eventBus)
 
     private fun setVarp(cheat: Cheat) =
         with(cheat) {
@@ -516,12 +961,6 @@ constructor(
                 player.queueDeath()
             }
             else -> player.mes("Usage: ::die pvm|pvp [true|false]  (true = in Wilderness)")
-        }
-    }
-
-    private fun bank(cheat: Cheat) = with(cheat) {
-        protectedAccess.launch(player) {
-            ifOpenMainSidePair(main = "interface.bankmain", side = "interface.bankside")
         }
     }
 

@@ -58,6 +58,13 @@ public data class IfOverlayScriptTrigger(
     override val id: Long = component.packed.toLong()
 }
 
+public data class IfModalPauseButton(
+    val component: ComponentType,
+    val comsub: Int,
+) : SuspendEvent<ProtectedAccess> {
+    override val id: Long = component.packed.toLong()
+}
+
 
 public data class IfOverlayButton(
     val component: ComponentType,

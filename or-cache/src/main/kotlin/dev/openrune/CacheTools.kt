@@ -28,6 +28,7 @@ import dev.openrune.tables.PickableObjects
 import dev.openrune.tables.SettingConfigs
 import dev.openrune.tables.StatComponents
 import dev.openrune.tables.skills.Cooking
+import dev.openrune.tables.skills.Construction
 import dev.openrune.tables.skills.Firemaking
 import dev.openrune.tables.skills.Herblore
 import dev.openrune.tables.skills.Mining
@@ -78,6 +79,7 @@ fun tablesToPack() = listOf(
     Mining.rocks(),
     Cooking.foods(),
     Cooking.ales(),
+    Construction.pohBuildables(),
     Herblore.unfinishedPotions(),
     Herblore.finishedPotions(),
     Herblore.cleaningHerbs(),

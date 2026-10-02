@@ -13,7 +13,7 @@ internal object InterfaceEvents {
     ): Boolean {
         val verifyStaticEvents = comsub == -1
         return if (verifyStaticEvents) {
-            component.hasEvent(event)
+            component.hasEvent(event) || ui.hasEvent(component, comsub, event)
         } else {
             ui.hasEvent(component, comsub, event)
         }
